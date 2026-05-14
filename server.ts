@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -11,12 +12,13 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
+  app.use(cors({ origin: true }));
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Endpoint FRED
   app.get("/api/fred", async (req, res) => {
     const seriesId = req.query.seriesId as string;
-    const apiKey = process.env.FRED_API_KEY || process.env.VITE_FRED_API_KEY;
+    const apiKey = process.env.FRED_API_KEY;
 
     if (!seriesId) return res.status(400).json({ ok: false, provider: "FRED", reason: "seriesId es obligatorio" });
     if (!apiKey) return res.status(500).json({ ok: false, provider: "FRED", reason: "FRED_API_KEY no configurada en el servidor" });
@@ -47,10 +49,11 @@ async function startServer() {
   // Endpoint Alpha Vantage Quote
   app.get("/api/alpha/quote", async (req, res) => {
     const symbol = req.query.symbol as string;
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY || process.env.VITE_ALPHA_VANTAGE_API_KEY;
+    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
     if (!symbol) return res.status(400).json({ ok: false, provider: "Alpha Vantage", reason: "symbol es obligatorio" });
-    if (!apiKey) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "ALPHA_VANTAGE_API_KEY no configurada" });
+    if (!apiKey) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La variable ALPHA_VANTAGE_API_KEY no está configurada en el backend." });
+    if (apiKey && apiKey.length < 5) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La clave de Alpha Vantage parece inválida." });
 
     try {
       const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
@@ -59,12 +62,15 @@ async function startServer() {
         return res.status(response.status).json({ ok: false, provider: "Alpha Vantage", symbol, reason: `Error Alpha Vantage: ${response.statusText}` });
       }
       const data = await response.json();
-      if (data.Note || data.Information || data["Error Message"]) {
-         return res.status(429).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Límite de proveedor alcanzado o símbolo no disponible" });
+      if (data.Note || data.Information) {
+         return res.status(429).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita." });
+      }
+      if (data["Error Message"]) {
+         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Símbolo no disponible en Alpha Vantage." });
       }
       const quote = data["Global Quote"];
       if (!quote || !quote["05. price"]) {
-        return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Datos de quote no disponibles" });
+        return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Respuesta inesperada de Alpha Vantage." });
       }
       return res.json({
         ok: true,
@@ -84,10 +90,11 @@ async function startServer() {
   // Endpoint Alpha Vantage Historical
   app.get("/api/alpha/historical", async (req, res) => {
     const symbol = req.query.symbol as string;
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY || process.env.VITE_ALPHA_VANTAGE_API_KEY;
+    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
     if (!symbol) return res.status(400).json({ ok: false, provider: "Alpha Vantage", reason: "symbol es obligatorio" });
-    if (!apiKey) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "ALPHA_VANTAGE_API_KEY no configurada" });
+    if (!apiKey) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La variable ALPHA_VANTAGE_API_KEY no está configurada en el backend." });
+    if (apiKey && apiKey.length < 5) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La clave de Alpha Vantage parece inválida." });
 
     try {
       const url = `https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol=${symbol}&apikey=${apiKey}`;
@@ -96,13 +103,16 @@ async function startServer() {
         return res.status(response.status).json({ ok: false, provider: "Alpha Vantage", symbol, reason: `Error Alpha Vantage: ${response.statusText}` });
       }
       const data = await response.json();
-      if (data.Note || data.Information || data["Error Message"]) {
-         return res.status(429).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Límite de proveedor alcanzado o símbolo no disponible" });
+      if (data.Note || data.Information) {
+         return res.status(429).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita." });
+      }
+      if (data["Error Message"]) {
+         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Símbolo no disponible en Alpha Vantage." });
       }
 
       const timeSeries = data["Weekly Time Series"];
       if (!timeSeries) {
-         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Histórico insuficiente" });
+         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Respuesta inesperada de Alpha Vantage." });
       }
 
       const dates = Object.keys(timeSeries).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
@@ -145,6 +155,78 @@ async function startServer() {
     }
   });
 
+  // Endpoint Alpha Vantage Diagnostic
+  app.get("/api/alpha/diagnostic", async (req, res) => {
+    const symbol = req.query.symbol as string;
+    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+    
+    const result = {
+      ok: false,
+      provider: "Alpha Vantage",
+      symbol: symbol || "NONE",
+      apiKeyPresent: !!apiKey,
+      apiKeyLooksValid: !!(apiKey && apiKey.length > 5 && apiKey !== "DEMO"),
+      detectedIssue: "none",
+      message: "Operación completada.",
+      rawKeysReceived: [] as string[]
+    };
+
+    if (!symbol) {
+      result.detectedIssue = "symbol_not_available";
+      result.message = "symbol es obligatorio";
+      return res.json(result);
+    }
+    
+    if (!apiKey) {
+      result.detectedIssue = "missing_key";
+      result.message = "La variable ALPHA_VANTAGE_API_KEY no está configurada en el backend.";
+      return res.json(result);
+    }
+    
+    if (!result.apiKeyLooksValid) {
+      result.detectedIssue = "invalid_key";
+      result.message = "La clave de Alpha Vantage parece inválida.";
+      return res.json(result);
+    }
+
+    try {
+      const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
+      const response = await fetch(url);
+      
+      if (!response.ok) {
+        result.detectedIssue = "provider_error";
+        result.message = `Fallo HTTP desde Alpha Vantage (Status: ${response.status})`;
+        return res.json(result);
+      }
+      
+      const data = await response.json();
+      result.rawKeysReceived = Object.keys(data);
+      
+      if (data.Note) {
+        result.detectedIssue = "rate_limit";
+        result.message = "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita.";
+      } else if (data.Information) {
+        result.detectedIssue = "rate_limit";
+        result.message = "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita.";
+      } else if (data["Error Message"]) {
+        result.detectedIssue = "symbol_not_available";
+        result.message = "Símbolo no disponible en Alpha Vantage o error en la petición.";
+      } else if (data["Global Quote"]) {
+        result.ok = true;
+        result.message = "Conexión exitosa, quote obtenido.";
+      } else {
+        result.detectedIssue = "unexpected_payload";
+        result.message = "Respuesta inesperada de Alpha Vantage.";
+      }
+      
+      return res.json(result);
+    } catch (error) {
+      result.detectedIssue = "network_error";
+      result.message = "Error de red al intentar contactar a Alpha Vantage.";
+      return res.json(result);
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -155,7 +237,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get(/^\/(?!api).*/, (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
