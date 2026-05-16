@@ -112,7 +112,9 @@ export async function fetchMarketData(ticker: string, preventRealApiCall: boolea
   const promise = (async () => {
     const mapping = assetMappings[ticker];
     
-    if (!ALPHA_VANTAGE_API_KEY || !mapping || !mapping.enabledForRealMarketData || mapping.provider !== "alpha_vantage" || preventRealApiCall) {
+    // En modo proxy, no necesitamos la API key en el frontend
+    const needsApiKey = !USE_PROXY_FOR_MARKET_DATA;
+    if ((needsApiKey && !ALPHA_VANTAGE_API_KEY) || !mapping || !mapping.enabledForRealMarketData || mapping.provider !== "alpha_vantage" || preventRealApiCall) {
       const mock = createMockMarketData(ticker);
       mock.fallbackReason = !mapping?.enabledForRealMarketData ? 'Activo no habilitado para proveedor real' : 
                             (!ALPHA_VANTAGE_API_KEY ? 'API key no configurada' : 'Límite de llamadas alcanzado (preventCall)');
@@ -337,7 +339,8 @@ export async function fetchAlphaVantageHistorical(ticker: string, preventRealApi
   if (!mapping.enabledForRealMarketData || mapping.provider !== "alpha_vantage") {
     return { historicalStatus: 'not_available', historicalReason: 'Proveedor no habilitado para este activo' };
   }
-  if (!ALPHA_VANTAGE_API_KEY) {
+  const needsApiKey = !USE_PROXY_FOR_MARKET_DATA;
+  if (needsApiKey && !ALPHA_VANTAGE_API_KEY) {
      return { historicalStatus: 'error', historicalReason: 'No hay API key configurada' };
   }
   if (preventRealApiCall) {
