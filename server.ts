@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 async function startServer() {
   const app = express();
   app.use(cors({ origin: true }));
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const PORT = 3000;
 
   // Endpoint FRED
   app.get("/api/fred", async (req, res) => {
@@ -21,15 +21,46 @@ async function startServer() {
     const apiKey = process.env.FRED_API_KEY;
 
     if (!seriesId) return res.status(400).json({ ok: false, provider: "FRED", reason: "seriesId es obligatorio" });
-    if (!apiKey) return res.status(500).json({ ok: false, provider: "FRED", reason: "FRED_API_KEY no configurada en el servidor" });
+    if (!apiKey) {
+      return res.status(500).json({ ok: false, provider: "FRED", seriesId, detectedIssue: "missing_key", reason: "FRED_API_KEY no configurada en el servidor" });
+    }
+    if (apiKey.length < 10) {
+      return res.status(500).json({ ok: false, provider: "FRED", seriesId, detectedIssue: "invalid_key", reason: "FRED_API_KEY parece ser inválida" });
+    }
 
     try {
-      const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=1`;
+      const encodedSeriesId = encodeURIComponent(seriesId);
+      const encodedApiKey = encodeURIComponent(apiKey);
+      const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${encodedSeriesId}&api_key=${encodedApiKey}&file_type=json&sort_order=desc&limit=1`;
       const response = await fetch(url);
-      if (!response.ok) {
-        return res.status(response.status).json({ ok: false, provider: "FRED", seriesId, reason: `Error de FRED: ${response.statusText}` });
+      
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        return res.status(response.status >= 400 ? response.status : 500).json({ 
+          ok: false, 
+          provider: "FRED", 
+          seriesId, 
+          detectedIssue: "unexpected_payload",
+          status: response.status,
+          statusText: response.statusText,
+          bodyPreview: text.substring(0, 300),
+          reason: `FRED devolvió un formato no válido: ${response.statusText}` 
+        });
       }
-      const data = await response.json();
+
+      if (!response.ok) {
+        return res.status(response.status).json({ 
+          ok: false, 
+          provider: "FRED", 
+          seriesId, 
+          detectedIssue: "fred_http_error",
+          reason: data.error_message || `Error de FRED: ${response.statusText}` 
+        });
+      }
+
       if (data.observations && data.observations.length > 0) {
         return res.json({
           ok: true,
@@ -42,7 +73,80 @@ async function startServer() {
       }
       return res.status(404).json({ ok: false, provider: "FRED", seriesId, reason: "No se encontraron observaciones" });
     } catch (error) {
-      return res.status(500).json({ ok: false, provider: "FRED", seriesId, reason: "Error de red al conectar con FRED backend" });
+      return res.status(500).json({ ok: false, provider: "FRED", seriesId, detectedIssue: "network_error", reason: "Error de red al conectar con FRED backend" });
+    }
+  });
+
+  // Endpoint FRED Diagnostic
+  app.get("/api/fred/diagnostic", async (req, res) => {
+    const seriesId = req.query.seriesId as string || "FEDFUNDS";
+    const apiKey = process.env.FRED_API_KEY;
+    
+    const result = {
+      ok: false,
+      provider: "FRED",
+      seriesId,
+      apiKeyPresent: !!apiKey,
+      apiKeyLooksValid: !!apiKey && apiKey.length >= 10,
+      detectedIssue: "none",
+      httpStatus: null as number | null,
+      message: "Diagnostic init",
+      rawKeysReceived: [] as string[]
+    };
+
+    if (!result.apiKeyPresent) {
+      result.detectedIssue = "missing_key";
+      result.message = "La clave FRED_API_KEY no está configurada en process.env.";
+      return res.json(result);
+    }
+    
+    if (!result.apiKeyLooksValid) {
+      result.detectedIssue = "invalid_key";
+      result.message = "La clave FRED_API_KEY parece demasiado corta para ser válida.";
+      return res.json(result);
+    }
+
+    try {
+      const encodedSeriesId = encodeURIComponent(seriesId);
+      const encodedApiKey = encodeURIComponent(apiKey as string);
+      const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${encodedSeriesId}&api_key=${encodedApiKey}&file_type=json&sort_order=desc&limit=1`;
+      
+      const response = await fetch(url);
+      result.httpStatus = response.status;
+      const text = await response.text();
+      
+      let data;
+      try {
+        data = JSON.parse(text);
+        result.rawKeysReceived = Object.keys(data);
+      } catch (e) {
+        result.detectedIssue = "unexpected_payload";
+        result.message = "FRED devolvió contenido que no es JSON.";
+        (result as any).bodyPreview = text.substring(0, 300);
+        return res.json(result);
+      }
+
+      if (!response.ok) {
+        result.detectedIssue = "provider_error";
+        result.message = data.error_message || `FRED respondió con estado HTTP ${response.status} ${response.statusText}`;
+        return res.json(result);
+      }
+
+      if (data.observations) {
+        result.ok = true;
+        result.detectedIssue = "real";
+        result.message = "La conexión con FRED funciona correctamente y ha devuelto observaciones.";
+      } else {
+        result.detectedIssue = "unexpected_payload";
+        result.message = "FRED devolvió JSON válido pero sin la propiedad 'observations'.";
+      }
+      
+      return res.json(result);
+
+    } catch (error: any) {
+      result.detectedIssue = "network_error";
+      result.message = `Error de red contactando a FRED: ${error.message}`;
+      return res.json(result);
     }
   });
 
