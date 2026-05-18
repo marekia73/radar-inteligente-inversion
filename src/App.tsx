@@ -26,6 +26,8 @@ import { AssetTable } from './components/dashboard/AssetTable';
 import { AssetDetailModal } from './components/dashboard/AssetDetailModal';
 import { MiniRanking } from './components/dashboard/MiniRanking';
 import { MacroDashboard } from './components/data/MacroDashboard';
+import { CompoundInterestCalculator } from './components/tools/CompoundInterestCalculator';
+import { InvestorProfileTest } from './components/tools/InvestorProfileTest';
 
 // Charts
 import { RiskPotentialMap } from './components/charts/RiskPotentialMap';
@@ -43,10 +45,16 @@ import {
   PieChart as PieChartIcon, 
   Map as MapIcon, 
   Info,
-  RefreshCw
+  RefreshCw,
+  Home,
+  UserCheck,
+  Calculator,
+  Globe,
+  BookOpen
 } from 'lucide-react';
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState<'home' | 'profile' | 'calculator' | 'radar' | 'macro' | 'education'>('home');
   const [filters, setFilters] = useState({
     type: "",
     horizon: "",
@@ -58,12 +66,39 @@ export default function App() {
   const [macroIndicators, setMacroIndicators] = useState<MacroIndicator[]>([]);
   const [marketDataMap, setMarketDataMap] = useState<Record<string, MarketData>>({});
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [userProfile, setUserProfile] = useState<{score: number, name: string} | null>(null);
   const [dataQuality, setDataQuality] = useState<DataQuality>({
     marketDataStatus: "simulated",
     macroDataStatus: "simulated",
     message: "Los datos reales, si están disponibles, se usan solo con finalidad educativa. Los datos pueden tener retrasos, errores o estar incompletos.",
     isUsingCache: false
   });
+
+  const loadUserProfile = () => {
+    const saved = localStorage.getItem('investor_profile_score');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        let name = "Desconocido";
+        const s = parsed.score;
+        if (s <= 20) name = "Muy Conservador";
+        else if (s <= 40) name = "Conservador";
+        else if (s <= 60) name = "Moderado";
+        else if (s <= 80) name = "Dinámico";
+        else name = "Agresivo";
+        setUserProfile({ score: s, name });
+      } catch (e) {}
+    } else {
+      setUserProfile(null);
+    }
+  };
+
+  useEffect(() => {
+    loadUserProfile();
+    // This allows the profile to update if the test gets done
+    window.addEventListener('storage', loadUserProfile);
+    return () => window.removeEventListener('storage', loadUserProfile);
+  }, []);
 
   // Process data once
   const baseProcessedAssets = useMemo(() => processAssets(mockAssets, mockMentors), []);
@@ -117,12 +152,15 @@ export default function App() {
       const anyMarketCache = Object.values(market).some(m => m.fromCache);
       const anyMacroCache = macro.some(m => m.fromCache);
       const isUsingCache = anyMarketCache || anyMacroCache;
+      
+      const isMarketRateLimited = Object.values(market).some(m => m.errorReason?.includes("limit") || m.errorReason?.includes("Límite") || m.fallbackReason?.includes("Límite"));
 
       setDataQuality(prev => ({
         ...prev,
         marketDataStatus: marketStatus as any,
         macroDataStatus: macroStatus as any,
-        isUsingCache
+        isUsingCache,
+        isMarketRateLimited
       }));
     } catch (err) {
       console.warn("Aviso: Fallo al cargar datos enriquecidos (puede ser rate limit o red):", err);
@@ -263,101 +301,192 @@ export default function App() {
         />
         <DataStatusBanner quality={dataQuality} isRefreshing={isRefreshing} />
         
-        <DataDiagnosticsPanel marketDataMap={marketDataMap} macroIndicators={macroIndicators} />
-
-        {/* Top KPIs */}
-        <div className="mt-8">
-          <SummaryCards assets={allProcessedAssets} />
+        {/* Navigation Tabs */}
+        <div className="flex overflow-x-auto whitespace-nowrap gap-2 mb-8 bg-slate-900 border border-slate-800 p-2 rounded-2xl sticky top-4 z-40 shadow-xl shadow-slate-950/50 [&::-webkit-scrollbar]:hidden">
+          <button onClick={() => setActiveTab('home')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 ${activeTab === 'home' ? 'bg-slate-800 text-emerald-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}><Home size={16}/> Inicio</button>
+          <button onClick={() => setActiveTab('profile')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 ${activeTab === 'profile' ? 'bg-slate-800 text-emerald-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}><UserCheck size={16}/> Mi Perfil Inversor</button>
+          <button onClick={() => setActiveTab('calculator')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 ${activeTab === 'calculator' ? 'bg-slate-800 text-emerald-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}><Calculator size={16}/> Calculadora</button>
+          <button onClick={() => setActiveTab('radar')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 ${activeTab === 'radar' ? 'bg-slate-800 text-emerald-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}><Radar size={16}/> Radar</button>
+          <button onClick={() => setActiveTab('macro')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 ${activeTab === 'macro' ? 'bg-slate-800 text-emerald-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}><Globe size={16}/> Macroeconomía</button>
+          <button onClick={() => setActiveTab('education')} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all flex-shrink-0 ${activeTab === 'education' ? 'bg-slate-800 text-emerald-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'}`}><BookOpen size={16}/> Formación</button>
         </div>
 
-        {/* Macro Dashboard */}
-        <div className="mt-8">
-          <MacroDashboard indicators={macroIndicators} />
-        </div>
-
-        {/* Mentor Knowledge Panel */}
-        <div className="mb-10">
-          <div className="flex items-center gap-2 mb-4 text-emerald-400">
-            <Info size={16} />
-            <h2 className="text-sm font-bold uppercase tracking-widest">Base de Conocimiento</h2>
-          </div>
-          <MentorPanel mentors={mockMentors} />
-          <div className="text-[10px] text-slate-500 italic mt-[-1rem] px-2 text-center">
-            {KNOWLEDGE_DISCLAIMER}
-          </div>
-        </div>
-
-        {/* NotebookLM Rules Panel */}
-        <KnowledgeRulesPanel />
-
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
-          
-          {/* Sidebar Left Rankings */}
-          <div className="xl:col-span-1 space-y-6">
-            <MiniRanking 
-              title="Top Corto Plazo" 
-              assets={allProcessedAssets} 
-              scoreKey="shortTermScore" 
-              onSelect={setSelectedAsset} 
-            />
-            <MiniRanking 
-              title="Top Largo Plazo (Paz)" 
-              assets={allProcessedAssets} 
-              scoreKey="longTermScore" 
-              onSelect={setSelectedAsset} 
-            />
-            <MiniRanking 
-              title="Top ETFs según Andrea" 
-              assets={andreaTopETFs} 
-              scoreKey="andreaScore" 
-              onSelect={setSelectedAsset} 
-            />
-            <MiniRanking 
-              title="Top Enfoque Andrea" 
-              assets={andreaTopGeneral} 
-              scoreKey="andreaScore" 
-              onSelect={setSelectedAsset} 
-            />
-            <MiniRanking 
-              title="Top Estrategia Pablo" 
-              assets={pabloTop} 
-              scoreKey="pabloScore" 
-              onSelect={setSelectedAsset} 
-            />
-          </div>
-
-          {/* Main Dashboard Area */}
-          <div className="xl:col-span-3 space-y-8">
-            
-            {/* Filters */}
-            <AssetFilters filters={filters} setFilters={setFilters} />
-
-            {/* Main Table */}
-            <SectionCard title="Ranking General del Radar" subtitle="Prioridad basada en relación oportunidad/riesgo">
-              <AssetTable assets={filteredAssets} onSelect={setSelectedAsset} />
-            </SectionCard>
-
-            {/* Charts Section */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <SectionCard title="Mapa Riesgo vs Potencial" subtitle="Ubicación visual de activos" icon={<MapIcon size={18} />}>
-                <RiskPotentialMap assets={filteredAssets} />
-              </SectionCard>
-              <SectionCard title="Top 10 Oportunidades" subtitle="Mayores puntajes actuales" icon={<BarChart3 size={18} />}>
-                <OpportunityBarChart assets={filteredAssets} />
-              </SectionCard>
+        {/* Home Tab */}
+        {activeTab === 'home' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="bg-slate-900 border border-emerald-500/30 p-8 rounded-3xl shadow-[0_0_40px_-10px_rgba(16,185,129,0.15)]">
+              <h2 className="text-3xl font-extrabold text-white mb-4">Bienvenido al Radar Inteligente</h2>
+              <p className="text-slate-300 text-lg mb-6 max-w-3xl leading-relaxed">
+                Esta es una <strong>herramienta educativa</strong> diseñada para ayudarte a entender cómo funcionan los mercados, cómo evaluar el riesgo y cómo se comporta el interés compuesto. <br/><br/>
+                No te diremos qué comprar. Te ayudaremos a <strong>estudiar, vigilar y comparar</strong> activos como si tuvieras a un equipo de mentores a tu lado.
+              </p>
+              
+              <h3 className="text-xl font-bold text-emerald-400 mb-4 flex items-center gap-2">
+                <Info size={20}/> Ruta recomendada para principiantes
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div onClick={() => setActiveTab('profile')} className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 cursor-pointer hover:border-emerald-500/50 transition-all hover:-translate-y-1">
+                  <div className="text-emerald-500 font-bold mb-2">Paso 1</div>
+                  <h4 className="text-white font-semibold mb-2">Conocer mi perfil</h4>
+                  <p className="text-slate-400 text-xs">Descubre qué nivel de riesgo puedes asumir emocionalmente.</p>
+                </div>
+                <div onClick={() => setActiveTab('calculator')} className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 cursor-pointer hover:border-emerald-500/50 transition-all hover:-translate-y-1">
+                  <div className="text-emerald-500 font-bold mb-2">Paso 2</div>
+                  <h4 className="text-white font-semibold mb-2">Interés compuesto</h4>
+                  <p className="text-slate-400 text-xs">Entiende cómo el tiempo puede multiplicar tus aportaciones.</p>
+                </div>
+                <div onClick={() => setActiveTab('radar')} className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 cursor-pointer hover:border-emerald-500/50 transition-all hover:-translate-y-1">
+                  <div className="text-emerald-500 font-bold mb-2">Paso 3</div>
+                  <h4 className="text-white font-semibold mb-2">Estudiar activos</h4>
+                  <p className="text-slate-400 text-xs">Explora el radar y mira qué opciones encajan contigo.</p>
+                </div>
+                <div onClick={() => setActiveTab('macro')} className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 cursor-pointer hover:border-emerald-500/50 transition-all hover:-translate-y-1">
+                  <div className="text-emerald-500 font-bold mb-2">Paso 4</div>
+                  <h4 className="text-white font-semibold mb-2">Entorno global</h4>
+                  <p className="text-slate-400 text-xs">Aprende cómo afecta la inflación y los tipos de interés.</p>
+                </div>
+                <div onClick={() => setActiveTab('education')} className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 cursor-pointer hover:border-emerald-500/50 transition-all hover:-translate-y-1">
+                  <div className="text-emerald-500 font-bold mb-2">Paso 5</div>
+                  <h4 className="text-white font-semibold mb-2">Mente fría</h4>
+                  <p className="text-slate-400 text-xs">Lee a los mentores y evita tomar decisiones impulsivas.</p>
+                </div>
+              </div>
             </div>
-
-            {/* Distribution Charts */}
-            <SectionCard title="Distribución de Análisis" subtitle="Composición del radar actual" icon={<PieChartIcon size={18} />}>
-              <DistributionCharts assets={allProcessedAssets} />
-            </SectionCard>
-
-            {/* Footnote */}
-            <footer className="pt-8 border-t border-white/5 text-center">
-              <p className="text-slate-500 text-sm">© 2026 Radar Inteligente de Inversión • Diseñado para la educación financiera</p>
-            </footer>
+            
+            <DataDiagnosticsPanel marketDataMap={marketDataMap} macroIndicators={macroIndicators} />
+            <SummaryCards assets={allProcessedAssets} />
           </div>
-        </div>
+        )}
+
+        {/* Profile Tab */}
+        {activeTab === 'profile' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <InvestorProfileTest />
+          </div>
+        )}
+
+        {/* Calculator Tab */}
+        {activeTab === 'calculator' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <CompoundInterestCalculator />
+          </div>
+        )}
+
+        {/* Education Tab */}
+        {activeTab === 'education' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+             <div className="flex items-center gap-2 mb-4 text-emerald-400">
+              <Info size={16} />
+              <h2 className="text-sm font-bold uppercase tracking-widest">Base de Conocimiento</h2>
+            </div>
+            <MentorPanel mentors={mockMentors} />
+            <div className="text-[10px] text-slate-500 italic mt-[-1rem] px-2 text-center">
+              {KNOWLEDGE_DISCLAIMER}
+            </div>
+            <KnowledgeRulesPanel />
+          </div>
+        )}
+
+        {/* Macro Tab */}
+        {activeTab === 'macro' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <MacroDashboard indicators={macroIndicators} />
+          </div>
+        )}
+
+        {/* Radar Tab */}
+        {activeTab === 'radar' && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {userProfile ? (
+              <div className="mb-6 bg-slate-900 border border-slate-700 p-4 rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <UserCheck className="text-emerald-500" size={24} />
+                  <div>
+                    <h3 className="text-white font-bold text-lg">Tu Perfil: {userProfile.name}</h3>
+                    <p className="text-sm text-slate-400">El radar te mostrará etiquetas educativas basadas en este perfil. Recuerda, siempre investiga antes de tomar cualquier decisión.</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                   <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Puntuación de riesgo</div>
+                   <div className="text-2xl font-extrabold text-emerald-400">{userProfile.score} / 100</div>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-6 bg-slate-800/80 border border-amber-500/30 p-4 rounded-xl flex items-center gap-4">
+                <div className="p-3 bg-amber-500/10 rounded-full text-amber-500">
+                  <UserCheck size={24} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-white font-bold mb-1">Personaliza tu experiencia educativa</h3>
+                  <p className="text-sm text-slate-400">Haz el test de perfil inversor en la pestaña "Mi Perfil Inversor" para ver etiquetas educativas adaptadas a ti en este radar.</p>
+                </div>
+                <button 
+                  onClick={() => setActiveTab('profile')}
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  Ir al Test
+                </button>
+              </div>
+            )}
+            
+            <div className="grid grid-cols-1 xl:grid-cols-4 gap-8">
+              {/* Sidebar Left Rankings */}
+              <div className="xl:col-span-1 space-y-6">
+                <MiniRanking 
+                  title="Top Corto Plazo" 
+                  assets={allProcessedAssets} 
+                  scoreKey="shortTermScore" 
+                  onSelect={setSelectedAsset} 
+                />
+                <MiniRanking 
+                  title="Top Largo Plazo" 
+                  assets={allProcessedAssets} 
+                  scoreKey="longTermScore" 
+                  onSelect={setSelectedAsset} 
+                />
+                <MiniRanking 
+                  title="Top ETFs Educativos" 
+                  assets={andreaTopETFs} 
+                  scoreKey="andreaScore" 
+                  onSelect={setSelectedAsset} 
+                />
+              </div>
+
+              {/* Main Dashboard Area */}
+              <div className="xl:col-span-3 space-y-8">
+                
+                {/* Filters */}
+                <AssetFilters filters={filters} setFilters={setFilters} />
+
+                {/* Main Table */}
+                <SectionCard title="Ranking General del Radar" subtitle="Prioridad basada en relación oportunidad/riesgo puramente algorítmica">
+                  <AssetTable assets={filteredAssets} onSelect={setSelectedAsset} userProfile={userProfile} />
+                </SectionCard>
+
+                {/* Charts Section */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <SectionCard title="Mapa Riesgo vs Potencial" subtitle="Ubicación visual de activos" icon={<MapIcon size={18} />}>
+                    <RiskPotentialMap assets={filteredAssets} />
+                  </SectionCard>
+                  <SectionCard title="Top 10 Oportunidades" subtitle="Mayores puntajes actuales" icon={<BarChart3 size={18} />}>
+                    <OpportunityBarChart assets={filteredAssets} />
+                  </SectionCard>
+                </div>
+
+                {/* Distribution Charts */}
+                <SectionCard title="Distribución de Análisis" subtitle="Composición del radar actual" icon={<PieChartIcon size={18} />}>
+                  <DistributionCharts assets={allProcessedAssets} />
+                </SectionCard>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Footnote */}
+        <footer className="pt-12 mt-12 border-t border-white/5 text-center">
+          <p className="text-slate-500 text-sm">© 2026 Radar Inteligente de Inversión • Diseñado para la educación financiera simulada</p>
+        </footer>
       </div>
 
       {/* Asset Detail Modal */}
