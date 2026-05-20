@@ -38,18 +38,28 @@ export const DataStatusBanner: React.FC<DataStatusBannerProps> = ({ quality, isR
       {getStatusIcon()}
       <div className="flex-1 flex gap-4 flex-wrap">
         <span className="font-medium">
-          Datos de Mercado: <strong>{statusTranslations[quality.marketDataStatus] || quality.marketDataStatus}</strong>
+          Datos de Mercado: <strong>
+            {statusTranslations[quality.marketDataStatus] || quality.marketDataStatus}
+            {quality.isMarketRateLimited && quality.marketDataStatus === "simulated" && " por límite de Alpha"}
+          </strong>
         </span>
         <span className="font-medium">
           Datos Macro: <strong>{statusTranslations[quality.macroDataStatus] || quality.macroDataStatus}</strong>
         </span>
       </div>
-      <p className="text-xs opacity-80 w-full md:w-auto mt-2 md:mt-0">
-        Los datos pueden proceder de API real, caché o simulación de seguridad.
-        <span className="block mt-1 text-[11px] opacity-90">
+      <div className="text-xs opacity-80 w-full md:w-auto mt-2 md:mt-0 flex flex-col gap-1">
+        {quality.isMarketRateLimited ? (
+          <span className="text-amber-300">
+            El proveedor de mercado (Yahoo Finance u otro) está limitando temporalmente las consultas o presenta errores. Se están utilizando datos en caché o simulados para mantener la experiencia educativa.
+          </span>
+        ) : (
+          <span>Los datos pueden proceder de API real, caché o simulación de seguridad.</span>
+        )}
+        <span className="block text-[11px] opacity-90">
           💡 <strong>Caché</strong> significa que se usa el último dato real guardado para no consumir llamadas innecesarias.
         </span>
-      </p>
+      </div>
     </div>
   );
 };
+
