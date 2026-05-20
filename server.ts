@@ -2,13 +2,9 @@ import express from "express";
 import cors from "cors";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -150,183 +146,162 @@ async function startServer() {
     }
   });
 
-  // Endpoint Alpha Vantage Quote
-  app.get("/api/alpha/quote", async (req, res) => {
+  // Endpoint Yahoo Finance Quote
+  app.get("/api/market/quote", async (req, res) => {
     const symbol = req.query.symbol as string;
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
-    if (!symbol) return res.status(400).json({ ok: false, provider: "Alpha Vantage", reason: "symbol es obligatorio" });
-    if (!apiKey) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La variable ALPHA_VANTAGE_API_KEY no está configurada en el backend." });
-    if (apiKey && apiKey.length < 5) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La clave de Alpha Vantage parece inválida." });
+    if (!symbol) return res.status(400).json({ ok: false, provider: "Yahoo Finance", reason: "symbol es obligatorio" });
 
     try {
-      const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
       const response = await fetch(url);
       if (!response.ok) {
-        return res.status(response.status).json({ ok: false, provider: "Alpha Vantage", symbol, reason: `Error Alpha Vantage: ${response.statusText}` });
+        return res.status(response.status).json({ ok: false, provider: "Yahoo Finance", symbol, reason: `Error Yahoo Finance: ${response.statusText}` });
       }
       const data = await response.json();
-      if (data.Note || data.Information) {
-         return res.status(429).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita." });
+      const result = data.chart?.result?.[0];
+      if (!result) {
+         return res.status(404).json({ ok: false, provider: "Yahoo Finance", symbol, reason: "Símbolo no encontrado." });
       }
-      if (data["Error Message"]) {
-         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Símbolo no disponible en Alpha Vantage." });
+      
+      const meta = result.meta;
+      const price = meta.regularMarketPrice;
+      const previousClose = meta.chartPreviousClose || meta.previousClose;
+      let changePercent = 0;
+      if (price && previousClose) {
+         changePercent = ((price - previousClose) / previousClose) * 100;
       }
-      const quote = data["Global Quote"];
-      if (!quote || !quote["05. price"]) {
-        return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Respuesta inesperada de Alpha Vantage." });
-      }
+      
       return res.json({
         ok: true,
-        provider: "Alpha Vantage",
+        provider: "Yahoo Finance",
         symbol,
-        price: parseFloat(quote["05. price"]),
-        changePercent: parseFloat(quote["10. change percent"].replace('%', '')),
-        currency: "USD", // Alpha Vantage suele devolver USD por defecto en acciones de EEUU.
-        lastUpdated: quote["07. latest trading day"],
+        price,
+        changePercent,
+        currency: meta.currency || "USD",
+        lastUpdated: new Date().toISOString(),
         rawStatus: "real"
       });
     } catch (error) {
-       return res.status(500).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Error de conexión interna Alpha Vantage" });
+       return res.status(500).json({ ok: false, provider: "Yahoo Finance", symbol, reason: "Error de conexión interna Yahoo Finance" });
     }
   });
 
-  // Endpoint Alpha Vantage Historical
-  app.get("/api/alpha/historical", async (req, res) => {
+  // Endpoint Yahoo Finance Historical
+  app.get("/api/market/historical", async (req, res) => {
     const symbol = req.query.symbol as string;
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
-    if (!symbol) return res.status(400).json({ ok: false, provider: "Alpha Vantage", reason: "symbol es obligatorio" });
-    if (!apiKey) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La variable ALPHA_VANTAGE_API_KEY no está configurada en el backend." });
-    if (apiKey && apiKey.length < 5) return res.status(500).json({ ok: false, provider: "Alpha Vantage", reason: "La clave de Alpha Vantage parece inválida." });
+    if (!symbol) return res.status(400).json({ ok: false, provider: "Yahoo Finance", reason: "symbol es obligatorio" });
 
     try {
-      const url = `https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol=${symbol}&apikey=${apiKey}`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=1y`;
       const response = await fetch(url);
       if (!response.ok) {
-        return res.status(response.status).json({ ok: false, provider: "Alpha Vantage", symbol, reason: `Error Alpha Vantage: ${response.statusText}` });
+        return res.status(response.status).json({ ok: false, provider: "Yahoo Finance", symbol, reason: `Error Yahoo Finance: ${response.statusText}` });
       }
       const data = await response.json();
-      if (data.Note || data.Information) {
-         return res.status(429).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita." });
-      }
-      if (data["Error Message"]) {
-         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Símbolo no disponible en Alpha Vantage." });
+      const result = data.chart?.result?.[0];
+      if (!result) {
+         return res.status(404).json({ ok: false, provider: "Yahoo Finance", symbol, reason: "Símbolo no encontrado." });
       }
 
-      const timeSeries = data["Weekly Time Series"];
-      if (!timeSeries) {
-         return res.status(404).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Respuesta inesperada de Alpha Vantage." });
+      const timestamps = result.timestamp || [];
+      const quote = result.indicators?.quote?.[0] || {};
+      const closePrices = quote.close || [];
+      const highs = quote.high || [];
+      const lows = quote.low || [];
+
+      // Remove nulls mapping arrays with indexes
+      const validIndexes = closePrices.map((c: any, i: number) => c !== null ? i : -1).filter((i: number) => i !== -1);
+      
+      if (validIndexes.length < 5) {
+         return res.status(400).json({ ok: false, provider: "Yahoo Finance", symbol, reason: "Histórico insuficiente" });
       }
 
-      const dates = Object.keys(timeSeries).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-      if (dates.length < 52) {
-         return res.status(400).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Histórico insuficiente" });
+      const getValidPrice = (targetIndexFromEnd: number) => {
+          let idx = validIndexes.length - 1 - targetIndexFromEnd;
+          if (idx < 0) idx = 0;
+          return closePrices[validIndexes[idx]];
       }
 
-      const currentPrice = parseFloat(timeSeries[dates[0]]["4. close"]);
-      const oneMonthAgoPrice = parseFloat(timeSeries[dates[4]]["4. close"]);
-      const threeMonthAgoPrice = parseFloat(timeSeries[dates[13]]["4. close"]);
-      const oneYearAgoPrice = parseFloat(timeSeries[dates[51]]["4. close"]);
+      const currentPrice = getValidPrice(0);
+      const oneMonthAgoPrice = getValidPrice(21); // aprox 21 trading days in month
+      const threeMonthAgoPrice = getValidPrice(63); // aprox 63 trading days
+      const oneYearAgoPrice = getValidPrice(validIndexes.length - 1);
 
       let high52 = -Infinity;
       let low52 = Infinity;
-      for (let i = 0; i < 52; i++) {
-         const d = timeSeries[dates[i]];
-         const h = parseFloat(d["2. high"]);
-         const l = parseFloat(d["3. low"]);
-         if (h > high52) high52 = h;
-         if (l < low52) low52 = l;
+      for (const idx of validIndexes) {
+         const h = highs[idx];
+         const l = lows[idx];
+         if (h !== null && h > high52) high52 = h;
+         if (l !== null && l < low52) low52 = l;
       }
+      if (high52 === -Infinity) high52 = 0;
+      if (low52 === Infinity) low52 = 0;
 
-      const calcChange = (current: number, past: number) => ((current - past) / past) * 100;
+      const calcChange = (current: number, past: number) => past !== 0 ? ((current - past) / past) * 100 : 0;
 
       return res.json({
         ok: true,
-        provider: "Alpha Vantage",
+        provider: "Yahoo Finance",
         symbol,
         oneMonthChangePercent: calcChange(currentPrice, oneMonthAgoPrice),
         threeMonthChangePercent: calcChange(currentPrice, threeMonthAgoPrice),
         oneYearChangePercent: calcChange(currentPrice, oneYearAgoPrice),
         fiftyTwoWeekHigh: high52,
         fiftyTwoWeekLow: low52,
-        historicalPoints: dates.length,
-        lastUpdated: dates[0],
+        historicalPoints: validIndexes.length,
+        lastUpdated: new Date().toISOString(),
         rawStatus: "real"
       });
     } catch (error) {
-       return res.status(500).json({ ok: false, provider: "Alpha Vantage", symbol, reason: "Error de conexión interna Alpha Vantage" });
+       return res.status(500).json({ ok: false, provider: "Yahoo Finance", symbol, reason: "Error de conexión interna Yahoo Finance" });
     }
   });
 
-  // Endpoint Alpha Vantage Diagnostic
-  app.get("/api/alpha/diagnostic", async (req, res) => {
-    const symbol = req.query.symbol as string;
-    const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
+  // Endpoint Yahoo Finance Diagnostic
+  app.get("/api/market/diagnostic", async (req, res) => {
+    const symbol = req.query.symbol as string || "MSFT";
     
     const result = {
       ok: false,
-      provider: "Alpha Vantage",
-      symbol: symbol || "NONE",
-      apiKeyPresent: !!apiKey,
-      apiKeyLooksValid: !!(apiKey && apiKey.length > 5 && apiKey !== "DEMO"),
+      provider: "Yahoo Finance",
+      symbol: symbol,
       detectedIssue: "none",
       message: "Operación completada.",
       rawKeysReceived: [] as string[]
     };
 
-    if (!symbol) {
-      result.detectedIssue = "symbol_not_available";
-      result.message = "symbol es obligatorio";
-      return res.json(result);
-    }
-    
-    if (!apiKey) {
-      result.detectedIssue = "missing_key";
-      result.message = "La variable ALPHA_VANTAGE_API_KEY no está configurada en el backend.";
-      return res.json(result);
-    }
-    
-    if (!result.apiKeyLooksValid) {
-      result.detectedIssue = "invalid_key";
-      result.message = "La clave de Alpha Vantage parece inválida.";
-      return res.json(result);
-    }
-
     try {
-      const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
       const response = await fetch(url);
       
       if (!response.ok) {
         result.detectedIssue = "provider_error";
-        result.message = `Fallo HTTP desde Alpha Vantage (Status: ${response.status})`;
+        result.message = `Fallo HTTP desde Yahoo Finance (Status: ${response.status})`;
         return res.json(result);
       }
       
       const data = await response.json();
       result.rawKeysReceived = Object.keys(data);
       
-      if (data.Note) {
-        result.detectedIssue = "rate_limit";
-        result.message = "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita.";
-      } else if (data.Information) {
-        result.detectedIssue = "rate_limit";
-        result.message = "Alpha Vantage ha limitado temporalmente las llamadas de la cuenta gratuita.";
-      } else if (data["Error Message"]) {
-        result.detectedIssue = "symbol_not_available";
-        result.message = "Símbolo no disponible en Alpha Vantage o error en la petición.";
-      } else if (data["Global Quote"]) {
+      const chartResult = data.chart?.result?.[0];
+      if (chartResult) {
         result.ok = true;
         result.message = "Conexión exitosa, quote obtenido.";
+      } else if (data.chart?.error) {
+        result.detectedIssue = "missing_symbol";
+        result.message = `Símbolo no disponible: ${data.chart.error?.description || 'Error desconocido'}`;
       } else {
         result.detectedIssue = "unexpected_payload";
-        result.message = "Respuesta inesperada de Alpha Vantage.";
+        result.message = "Respuesta inesperada de Yahoo Finance.";
       }
       
       return res.json(result);
-    } catch (error) {
+    } catch (error: any) {
       result.detectedIssue = "network_error";
-      result.message = "Error de red al intentar contactar a Alpha Vantage.";
+      result.message = `Error de red al intentar contactar a Yahoo Finance: ${error.message}`;
       return res.json(result);
     }
   });
