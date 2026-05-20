@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { MarketData, MacroIndicator } from '../../types';
-import { ChevronDown, ChevronUp, Database, RefreshCw, CheckCircle, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { ChevronDown, ChevronUp, Database, RefreshCw, CheckCircle, AlertTriangle, ShieldCheck, Search } from 'lucide-react';
 import { assetMappings } from '../../data/assetMappings';
-import { testFredConnection } from '../../services/macroDataService';
+import { fetchMarketDiagnosticViaProxy, fetchFredDiagnosticViaProxy } from '../../services/backendProxyClient';
 import { DATA_PROVIDER_MODE } from '../../services/dataProviderConfig';
 
 function safeText(value: unknown, fallback = "-"): string {
@@ -20,7 +20,10 @@ interface DataDiagnosticsPanelProps {
 export const DataDiagnosticsPanel: React.FC<DataDiagnosticsPanelProps> = ({ marketDataMap, macroIndicators }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [testingFred, setTestingFred] = useState(false);
-  const [fredTestResult, setFredTestResult] = useState<{ success: boolean; reason: string } | null>(null);
+  const [fredTestResult, setFredTestResult] = useState<any | null>(null);
+
+  const [testingMarket, setTestingMarket] = useState(false);
+  const [marketTestResult, setMarketTestResult] = useState<any | null>(null);
 
   const marketVals: MarketData[] = Object.values(marketDataMap);
   const enabledMarketVals = marketVals.filter(m => assetMappings[m.symbol]?.enabledForRealMarketData);
@@ -48,9 +51,17 @@ export const DataDiagnosticsPanel: React.FC<DataDiagnosticsPanelProps> = ({ mark
   const handleTestFred = async () => {
     setTestingFred(true);
     setFredTestResult(null);
-    const result = await testFredConnection();
-    setFredTestResult(result);
+    const result = await fetchFredDiagnosticViaProxy("FEDFUNDS");
+    setFredTestResult(result.data ? result.data : { ok: false, message: result.reason });
     setTestingFred(false);
+  };
+
+  const handleTestMarket = async () => {
+    setTestingMarket(true);
+    setMarketTestResult(null);
+    const result = await fetchMarketDiagnosticViaProxy("MSFT");
+    setMarketTestResult(result.data ? result.data : { ok: false, message: result.reason });
+    setTestingMarket(false);
   };
 
   return (
@@ -86,22 +97,41 @@ export const DataDiagnosticsPanel: React.FC<DataDiagnosticsPanelProps> = ({ mark
               <h4 className="font-bold text-white">Mercado (Activos con proveedor asignado)</h4>
               <div className="flex gap-2">
                 <button
-                  onClick={async () => {
-                    const statusCache = marketVals.map(m => m.symbol);
-                    if (statusCache.includes("MSFT")) {
-                       setTestingFred(true); // Reusing testing state or create new
-                       const { fetchAlphaVantageHistorical } = await import('../../services/marketDataService');
-                       const res = await fetchAlphaVantageHistorical("MSFT", false, true);
-                       setFredTestResult({ success: res.historicalStatus === 'real' || res.historicalStatus === 'cache', reason: `MSFT Hist: ${res.historicalReason}. Status: ${res.historicalStatus}` });
-                       setTestingFred(false);
-                    }
-                  }}
-                  className="flex items-center gap-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300 transition-colors"
+                   onClick={async () => {
+                     const { clearMarketCache } = await import('../../services/marketDataService');
+                     clearMarketCache();
+                     alert("Caché local borrada. Ahora forzará recarga limpia desde origen al hacer Actualizar.");
+                   }}
+                   className="flex items-center gap-2 px-3 py-1 bg-red-900/40 hover:bg-red-800/60 border border-red-800/50 rounded text-xs text-red-200 transition-colors"
                 >
-                  Probar Histórico MSFT
+                   <RefreshCw size={12} />
+                   Limpiar Caché Local
+                </button>
+                <button
+                   onClick={handleTestMarket}
+                   disabled={testingMarket}
+                   className="flex items-center gap-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-300 transition-colors disabled:opacity-50"
+                >
+                   <Search size={12} className={testingMarket ? 'animate-spin' : ''} />
+                   {testingMarket ? 'Diagnosticando...' : 'Diagnóstico Yahoo Finance'}
                 </button>
               </div>
             </div>
+
+            {marketTestResult && (
+               <div className={`mb-4 p-3 rounded-md text-xs flex flex-col gap-2 ${marketTestResult.ok ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
+                  <div className="flex gap-2 items-center font-bold">
+                    {marketTestResult.ok ? <CheckCircle size={14} className="text-emerald-400" /> : <AlertTriangle size={14} className="text-red-400" />}
+                    <span className={marketTestResult.ok ? 'text-emerald-400' : 'text-red-400'}>{marketTestResult.message || "Error desconocido"}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-slate-300 mt-1">
+                    <div><span className="text-slate-500">Proveedor:</span> {marketTestResult.provider || 'N/A'}</div>
+                    <div><span className="text-slate-500">Símbolo (MSFT):</span> {marketTestResult.symbol || 'N/A'}</div>
+                    <div><span className="text-slate-500">Estado Proveedor:</span> {marketTestResult.detectedIssue === 'real' ? 'Operativo' : marketTestResult.detectedIssue}</div>
+                    <div><span className="text-slate-500">Claves recibidas:</span> {marketTestResult.rawKeysReceived ? marketTestResult.rawKeysReceived.join(', ') : 'Ninguna'}</div>
+                  </div>
+               </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead>
@@ -176,9 +206,17 @@ export const DataDiagnosticsPanel: React.FC<DataDiagnosticsPanelProps> = ({ mark
             </div>
 
             {fredTestResult && (
-               <div className={`mb-4 p-3 rounded-md text-xs flex gap-2 items-start ${fredTestResult.success ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
-                  {fredTestResult.success ? <CheckCircle size={14} className="mt-0.5 shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
-                  <span>{fredTestResult.reason}</span>
+               <div className={`mb-4 p-3 rounded-md text-xs flex flex-col gap-2 ${fredTestResult.ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300' : 'bg-red-500/10 border border-red-500/20 text-red-300'}`}>
+                  <div className="flex gap-2 items-start">
+                    {fredTestResult.ok ? <CheckCircle size={14} className="mt-0.5 shrink-0" /> : <AlertTriangle size={14} className="mt-0.5 shrink-0" />}
+                    <span>{fredTestResult.message || fredTestResult.reason}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-slate-300 mt-1">
+                    <div><span className="text-slate-500">API Key Configurada:</span> {fredTestResult.apiKeyPresent ? 'Sí' : 'No'}</div>
+                    <div><span className="text-slate-500">Parece Válida:</span> {fredTestResult.apiKeyLooksValid ? 'Sí' : 'No'}</div>
+                    <div><span className="text-slate-500">Estado FRED:</span> {fredTestResult.detectedIssue}</div>
+                    <div><span className="text-slate-500">Claves recibidas:</span> {fredTestResult.rawKeysReceived ? fredTestResult.rawKeysReceived.join(', ') : 'Ninguna'}</div>
+                  </div>
                </div>
             )}
 
@@ -232,3 +270,4 @@ export const DataDiagnosticsPanel: React.FC<DataDiagnosticsPanelProps> = ({ mark
     </div>
   );
 };
+
