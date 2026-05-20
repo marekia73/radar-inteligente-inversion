@@ -187,7 +187,9 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ asset, onClo
                       <p className="font-mono text-lg text-white">
                         {mData?.price !== null && mData?.price !== undefined && !Number.isNaN(mData.price)
                           ? `${mData.price.toFixed(2)} ${mData.currency || 'USD'}`
-                          : "Dato simulado/No cotizado"}
+                          : ((mData?.errorReason?.includes("limit") || mData?.errorReason?.includes("Límite") || mData?.fallbackReason?.includes("Límite")) 
+                             ? "Dato no disponible por límite del proveedor externo"
+                             : "Dato simulado/No cotizado")}
                       </p>
                     </div>
                     <div>
@@ -246,7 +248,9 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ asset, onClo
                        <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-1">
                          <p className="text-xs text-amber-300 flex items-start gap-2">
                            <ShieldAlert size={14} className="mt-0.5 shrink-0" />
-                           Dato educativo/simulado: este activo no tiene proveedor de mercado conectado de forma real.
+                           {(mData?.errorReason?.includes("limit") || mData?.errorReason?.includes("Límite") || mData?.fallbackReason?.includes("Límite") || mData?.errorReason?.includes('Rate limit'))
+                             ? "El activo sí cotiza, pero el proveedor gratuito ha limitado la consulta."
+                             : "Dato educativo/simulado: este activo no tiene proveedor de mercado conectado de forma real."}
                          </p>
                        </div>
                     )}
@@ -421,3 +425,4 @@ export const AssetDetailModal: React.FC<AssetDetailModalProps> = ({ asset, onClo
     </AnimatePresence>
   );
 };
+
